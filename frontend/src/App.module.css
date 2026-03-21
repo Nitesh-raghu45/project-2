@@ -1,0 +1,12 @@
+/* App.module.css */
+.layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg-primary);
+}

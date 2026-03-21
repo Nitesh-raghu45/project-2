@@ -1,6 +1,8 @@
 # backend/app/services/rag_service.py
 
-from app.rag.rag_service import get_rag_response, stream_rag_response, ingest_file
+from app.rag.rag_service import get_rag_response
+from app.rag.rag_service import stream_rag_response as _stream_rag_response
+from app.rag.rag_service import ingest_file
 from typing import Iterator
 
 
@@ -9,7 +11,7 @@ def rag_response(query: str) -> dict:
 
 
 def rag_stream_response(query: str) -> Iterator[str]:
-    return stream_rag_response(query)
+    return _stream_rag_response(query)
 
 
 def rag_ingest(file_path: str) -> dict:

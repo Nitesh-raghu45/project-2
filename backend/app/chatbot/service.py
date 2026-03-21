@@ -2,41 +2,23 @@
 
 from langchain_core.messages import HumanMessage
 from app.chatbot.graph import chatbot
+from app.database.sqlite_db import save_message, create_session
 from app.logger.logger import logger
 from typing import Iterator
 
 
 def _make_config(thread_id: str) -> dict:
-    """
-    Build the LangGraph config dict.
-    SqliteSaver uses thread_id to load/save the correct conversation.
-    """
     return {
         "configurable": {"thread_id": thread_id},
         "run_name": "chat_turn",
     }
 
 
-# ── Standard invoke (returns full string) ─────────────────────────────────
 def get_chat_response(message: str, thread_id: str) -> str:
-    """
-    Invoke the chatbot graph for one turn.
-    SqliteSaver automatically:
-      - loads this thread's full history before chat_node runs
-      - saves the updated state (including AI reply) after chat_node completes
-    No manual DB calls needed.
-
-    Args:
-        message   : User's latest message.
-        thread_id : Unique conversation ID (uuid string).
-
-    Returns:
-        AI response as a plain string.
-    """
+    """Standard invoke — saves both turns to global SQLite after response."""
     logger.info(f"[service] invoke | thread={thread_id}")
-
+    create_session(thread_id, feature='chat')
     config = _make_config(thread_id)
-
     try:
         result = chatbot.invoke(
             {"messages": [HumanMessage(content=message)]},
@@ -47,24 +29,25 @@ def get_chat_response(message: str, thread_id: str) -> str:
         raise
 
     ai_reply: str = result["messages"][-1].content
-    logger.info(f"[service] reply ready | thread={thread_id}")
+
+    # Persist both turns to global SQLite
+    save_message(thread_id, "user",      message,  feature='chat')
+    save_message(thread_id, "assistant", ai_reply, feature='chat')
+
     return ai_reply
 
 
-# ── Streaming invoke (yields token chunks) ────────────────────────────────
 def stream_chat_response(message: str, thread_id: str) -> Iterator[str]:
     """
-    Stream the chatbot response token-by-token using stream_mode='messages'.
-    Yields each content chunk as it arrives from Groq — identical to
-    Streamlit's st.write_stream() pattern in your working code.
-
-    Usage in FastAPI (SSE):
-        for chunk in stream_chat_response(msg, thread_id):
-            yield f"data: {chunk}\\n\\n"
+    Streaming invoke — yields tokens as they arrive.
+    Saves FULL message to global SQLite only after stream completes.
+    This way partial/incomplete messages are never saved.
     """
     logger.info(f"[service] stream | thread={thread_id}")
-
+    create_session(thread_id, feature='chat')
     config = _make_config(thread_id)
+
+    full_response = ""
 
     try:
         for message_chunk, metadata in chatbot.stream(
@@ -73,7 +56,14 @@ def stream_chat_response(message: str, thread_id: str) -> Iterator[str]:
             stream_mode="messages",
         ):
             if message_chunk.content:
+                full_response += message_chunk.content
                 yield message_chunk.content
+
+        # Stream finished — now save both turns to global SQLite
+        save_message(thread_id, "user",      message,       feature='chat')
+        save_message(thread_id, "assistant", full_response, feature='chat')
+        logger.info(f"[service] stream complete + saved | thread={thread_id}")
+
     except Exception as e:
         logger.error(f"[service] stream error: {e}")
         raise

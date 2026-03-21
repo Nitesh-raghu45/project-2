@@ -1,32 +1,30 @@
 # backend/app/database/sqlite_db.py
 
 import sqlite3
-from typing import Optional
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from app.logger.logger import logger
 
-DB_PATH = "chat.db"
+DB_PATH = "chatbot.db"
 
 
-# ── Connection ─────────────────────────────────────────────────────────────
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row      # access columns by name
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     return conn
 
 
-# ── Schema Init ────────────────────────────────────────────────────────────
 def init_db() -> None:
     """
-    Create tables if they don't exist.
-    Call this once at application startup (see main.py lifespan).
+    Create global messages table used across ALL features
+    (chatbot, RAG, research) — single shared DB.
+    Called once at startup from main.py lifespan.
     """
     with get_connection() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id  TEXT PRIMARY KEY,
-                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-                summary     TEXT DEFAULT ''
+                feature     TEXT DEFAULT 'chat',
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -34,58 +32,41 @@ def init_db() -> None:
                 session_id  TEXT NOT NULL,
                 role        TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
                 content     TEXT NOT NULL,
+                feature     TEXT DEFAULT 'chat',
                 created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(session_id)
             );
         """)
-        logger.info("[db] Tables initialised.")
+    logger.info("[db] Global SQLite tables initialised.")
 
 
-# ── Session helpers ────────────────────────────────────────────────────────
-def create_session(session_id: str) -> None:
+def create_session(session_id: str, feature: str = 'chat') -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO sessions (session_id) VALUES (?)",
-            (session_id,),
-        )
-    logger.info(f"[db] Session created: {session_id}")
-
-
-def update_summary(session_id: str, summary: str) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "UPDATE sessions SET summary = ? WHERE session_id = ?",
-            (summary, session_id),
+            "INSERT OR IGNORE INTO sessions (session_id, feature) VALUES (?, ?)",
+            (session_id, feature),
         )
 
 
-def get_summary(session_id: str) -> str:
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT summary FROM sessions WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-    return row["summary"] if row else ""
-
-
-# ── Message helpers ────────────────────────────────────────────────────────
-def save_message(session_id: str, role: str, content: str) -> None:
-    """Persist a single turn to the messages table."""
+def save_message(session_id: str, role: str, content: str, feature: str = 'chat') -> None:
+    """
+    Persist a single message turn.
+    Called AFTER streaming completes so the full content is saved — not mid-stream.
+    Works for all features: chat, rag, research.
+    """
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-            (session_id, role, content),
+            "INSERT INTO messages (session_id, role, content, feature) VALUES (?, ?, ?, ?)",
+            (session_id, role, content, feature),
         )
+    logger.info(f"[db] Saved {role} message | session={session_id} | feature={feature}")
 
 
 def get_session_messages(session_id: str) -> list[BaseMessage]:
-    """
-    Load all messages for a session and return them as LangChain message objects.
-    """
+    """Load full conversation history for a session as LangChain messages."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT role, content FROM messages "
-            "WHERE session_id = ? ORDER BY id ASC",
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
 
@@ -95,5 +76,19 @@ def get_session_messages(session_id: str) -> list[BaseMessage]:
             history.append(HumanMessage(content=row["content"]))
         else:
             history.append(AIMessage(content=row["content"]))
-
     return history
+
+
+def get_all_sessions(feature: str = None) -> list[str]:
+    """Return all session IDs, optionally filtered by feature."""
+    with get_connection() as conn:
+        if feature:
+            rows = conn.execute(
+                "SELECT session_id FROM sessions WHERE feature = ? ORDER BY created_at DESC",
+                (feature,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT session_id FROM sessions ORDER BY created_at DESC"
+            ).fetchall()
+    return [r["session_id"] for r in rows]

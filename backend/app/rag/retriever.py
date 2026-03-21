@@ -1,77 +1,63 @@
-# Retriever logic
 # backend/app/rag/retriever.py
 
-import os
-from langchain_community.vectorstores import FAISS
+from pinecone import Pinecone
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from app.config.settings import settings
 from app.logger.logger import logger
 
 
-# ── Embeddings (same model as ingest — must match) ────────────────────────
 embeddings = HuggingFaceEmbeddings(
     model_name=settings.EMBEDDING_MODEL,
     model_kwargs={"device": "cpu"},
 )
 
 
-def load_vectorstore() -> FAISS:
-    """
-    Load the FAISS index from disk.
-    Raises FileNotFoundError if no documents have been ingested yet.
-    """
-    if not os.path.exists(settings.FAISS_INDEX_PATH):
-        raise FileNotFoundError(
-            f"FAISS index not found at '{settings.FAISS_INDEX_PATH}'. "
-            "Please ingest documents first via POST /api/rag/ingest."
-        )
-
-    logger.info(f"[retriever] Loading FAISS index from {settings.FAISS_INDEX_PATH}")
-    return FAISS.load_local(
-        settings.FAISS_INDEX_PATH,
-        embeddings,
-        allow_dangerous_deserialization=True,
-    )
-
-
 def retrieve_chunks(query: str, k: int = None) -> list[Document]:
     """
-    Retrieve the top-k most relevant document chunks for a query.
+    Embed the query and retrieve top-k most similar chunks from Pinecone.
 
-    Args:
-        query : user's question
-        k     : number of chunks to return (defaults to settings.RAG_TOP_K)
-
-    Returns:
-        List of LangChain Document objects with page_content + metadata
+    Returns list of LangChain Document objects.
     """
     k = k or settings.RAG_TOP_K
+    logger.info(f"[retriever] Querying Pinecone for: '{query}' (top {k})")
 
-    vectorstore = load_vectorstore()
-    retriever   = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": k},
+    pc    = Pinecone(api_key=settings.PINECONE_API_KEY)
+    index = pc.Index(settings.PINECONE_INDEX_NAME)
+
+    query_vector = embeddings.embed_query(query)
+
+    results = index.query(
+        vector=query_vector,
+        top_k=k,
+        include_metadata=True,
     )
 
-    logger.info(f"[retriever] Retrieving top {k} chunks for: '{query}'")
-    docs = retriever.invoke(query)
-    logger.info(f"[retriever] Retrieved {len(docs)} chunks.")
+    docs = []
+    for match in results.matches:
+        meta = match.metadata or {}
+        docs.append(Document(
+            page_content=meta.get("text", ""),
+            metadata={
+                "source": meta.get("source", "Unknown"),
+                "page":   meta.get("page", ""),
+                "score":  match.score,
+            },
+        ))
 
+    logger.info(f"[retriever] Retrieved {len(docs)} chunks.")
     return docs
 
 
 def format_context(docs: list[Document]) -> str:
-    """
-    Convert retrieved Document chunks into a clean numbered
-    string block to inject into the LLM prompt.
-    """
-    context_parts = []
+    """Format retrieved chunks into a numbered context block for the LLM prompt."""
+    parts = []
     for i, doc in enumerate(docs, start=1):
         source = doc.metadata.get("source", "Unknown")
         page   = doc.metadata.get("page", "")
-        ref    = f"{source} p.{page}" if page != "" else source
-        context_parts.append(
-            f"[{i}] (Source: {ref})\n{doc.page_content.strip()}"
+        ref    = f"{source} p.{page}" if page else source
+        score  = doc.metadata.get("score", 0)
+        parts.append(
+            f"[{i}] (Source: {ref} | Relevance: {score:.2f})\n{doc.page_content.strip()}"
         )
-    return "\n\n".join(context_parts)
+    return "\n\n".join(parts)
