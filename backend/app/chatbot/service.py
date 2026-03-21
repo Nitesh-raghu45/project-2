@@ -1,57 +1,79 @@
 # backend/app/chatbot/service.py
 
 from langchain_core.messages import HumanMessage
-from app.chatbot.graph import chatbot_graph
-from app.database.sqlite_db import save_message, get_session_messages
+from app.chatbot.graph import chatbot
 from app.logger.logger import logger
+from typing import Iterator
 
 
-def get_chat_response(message: str, session_id: str) -> str:
+def _make_config(thread_id: str) -> dict:
     """
-    Public entry point for the chatbot.
+    Build the LangGraph config dict.
+    SqliteSaver uses thread_id to load/save the correct conversation.
+    """
+    return {
+        "configurable": {"thread_id": thread_id},
+        "run_name": "chat_turn",
+    }
 
-    Steps:
-        1. Load previous messages for this session from SQLite.
-        2. Run the LangGraph graph with the full history + new message.
-        3. Persist the new Human + AI messages back to SQLite.
-        4. Return the AI reply string.
+
+# ── Standard invoke (returns full string) ─────────────────────────────────
+def get_chat_response(message: str, thread_id: str) -> str:
+    """
+    Invoke the chatbot graph for one turn.
+    SqliteSaver automatically:
+      - loads this thread's full history before chat_node runs
+      - saves the updated state (including AI reply) after chat_node completes
+    No manual DB calls needed.
 
     Args:
-        message    : The user's latest message.
-        session_id : Unique session identifier (uuid string).
+        message   : User's latest message.
+        thread_id : Unique conversation ID (uuid string).
 
     Returns:
         AI response as a plain string.
     """
+    logger.info(f"[service] invoke | thread={thread_id}")
 
-    logger.info(f"[service] New message | session={session_id}")
-
-    # ── 1. Load history from DB ───────────────────────────────────────────
-    history = get_session_messages(session_id)   # list[BaseMessage]
-
-    # ── 2. Append the new user message ───────────────────────────────────
-    history.append(HumanMessage(content=message))
-
-    # ── 3. Invoke the graph ───────────────────────────────────────────────
-    initial_state = {
-        "messages": history,
-        "summary": "",          # graph will update this if summarisation runs
-        "session_id": session_id,
-    }
+    config = _make_config(thread_id)
 
     try:
-        result = chatbot_graph.invoke(initial_state)
+        result = chatbot.invoke(
+            {"messages": [HumanMessage(content=message)]},
+            config=config,
+        )
     except Exception as e:
-        logger.error(f"[service] Graph error: {e}")
+        logger.error(f"[service] invoke error: {e}")
         raise
 
-    # ── 4. Extract AI reply ───────────────────────────────────────────────
     ai_reply: str = result["messages"][-1].content
-
-    # ── 5. Persist both turns to SQLite ──────────────────────────────────
-    save_message(session_id=session_id, role="user",      content=message)
-    save_message(session_id=session_id, role="assistant", content=ai_reply)
-
-    logger.info(f"[service] Reply saved | session={session_id}")
-
+    logger.info(f"[service] reply ready | thread={thread_id}")
     return ai_reply
+
+
+# ── Streaming invoke (yields token chunks) ────────────────────────────────
+def stream_chat_response(message: str, thread_id: str) -> Iterator[str]:
+    """
+    Stream the chatbot response token-by-token using stream_mode='messages'.
+    Yields each content chunk as it arrives from Groq — identical to
+    Streamlit's st.write_stream() pattern in your working code.
+
+    Usage in FastAPI (SSE):
+        for chunk in stream_chat_response(msg, thread_id):
+            yield f"data: {chunk}\\n\\n"
+    """
+    logger.info(f"[service] stream | thread={thread_id}")
+
+    config = _make_config(thread_id)
+
+    try:
+        for message_chunk, metadata in chatbot.stream(
+            {"messages": [HumanMessage(content=message)]},
+            config=config,
+            stream_mode="messages",
+        ):
+            if message_chunk.content:
+                yield message_chunk.content
+    except Exception as e:
+        logger.error(f"[service] stream error: {e}")
+        raise

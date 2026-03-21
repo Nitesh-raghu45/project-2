@@ -1,20 +1,51 @@
-fastapi
-uvicorn[standard]
-pydantic
-langchain
-langchain-groq
-langchain-community
-langchain-huggingface
-langgraph
-faiss-cpu
-sentence-transformers
-pypdf
-docx2txt
-python-multipart
-python-dotenv
-tavily-python
+# fastapi
+# uvicorn[standard]
+# pydantic
+# langchain
+# langchain-groq
+# langchain-community
+# langchain-huggingface
+# langgraph
+# faiss-cpu
+# sentence-transformers
+# pypdf
+# docx2txt
+# python-multipart
+# python-dotenv
+# tavily-python
 
-# testing
-pytest
-pytest-asyncio
-httpx
+# # testing
+# pytest
+# pytest-asyncio
+# httpx
+
+# Backend
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.12.5
+
+# LangChain Ecosystem (ALIGNED)
+langchain==1.2.13
+langchain-core==1.2.20
+langchain-community==0.4.1
+langchain-groq==1.1.2
+langchain-huggingface==1.2.1
+langgraph==1.1.3
+
+# Vector DB / Embeddings
+faiss-cpu==1.8.0
+sentence-transformers==3.0.1
+
+# Document loaders
+pypdf==5.0.1
+docx2txt==0.8
+
+# Utils
+python-multipart==0.0.9
+python-dotenv==1.0.1
+tavily-python==0.5.0
+
+# Testing
+pytest==9.0.2
+pytest-asyncio==1.3.0
+httpx==0.28.1

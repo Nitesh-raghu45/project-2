@@ -1,7 +1,7 @@
 # backend/app/agents/research_agent.py
 
 from langchain_groq import ChatGroq
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.config.settings import settings
 from app.logger.logger import logger
@@ -9,7 +9,7 @@ from app.utils.helpers import truncate_text
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────
-search_tool = TavilySearchResults(
+search_tool = TavilySearch(
     max_results=5,
     api_key=settings.TAVILY_API_KEY,
 )
