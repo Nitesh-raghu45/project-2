@@ -1,15 +1,12 @@
-<h1 align="center">NexusAI System</h1>
+<h1 align="center">NexusAI — Full-Stack AI Platform</h1>
 
 <p align="center">
-  <img src="nexusai_system_diagram.svg" width="700">
+  <img src="nexusai_system_diagram.svg" width="1200">
 </p>
 
-<p align="center">
-  <b>AI-powered architecture for intelligent automation</b>
-</p>
-# NexusAI — Full-Stack AI Platform
 
-> A production-grade AI application with a memory-persistent chatbot, document Q&A (RAG), and a self-critiquing research agent — built with LangGraph, FastAPI, Pinecone, and React.
+
+# A production-grade AI application with a memory-persistent chatbot, document Q&A (RAG), and a self-critiquing research agent — built with LangGraph, FastAPI, Pinecone, and React.
 
 ---
 
