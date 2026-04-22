@@ -1,8 +1,5 @@
 <h1 align="center">NexusAI — Full-Stack AI Platform</h1>
 
-<p align="center">
-  <img src="nexusai_system_diagram.svg" width="1200">
-</p>
 
 
 
